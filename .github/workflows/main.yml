@@ -207,6 +207,192 @@
 #           push: true
 #           platforms: linux/amd64
 #           tags: mrsafonov/taski_backend:latest
+# name: Main Taski workflow
+
+# on:
+#   push:
+#     branches:
+#       - main
+
+# jobs:
+#   tests:
+#     runs-on: ubuntu-latest
+#     # Блок services аналогичен docker-compose.yml
+#     services:
+#       postgres:
+#         image: postgres:13.10
+#         # Указываем имя тестовой базы, имя и пароль пользователя в открытом виде,
+#         # ведь эта база будет работать только во время прогона тестов
+#         env:
+#           POSTGRES_USER: django_user
+#           POSTGRES_PASSWORD: django_password
+#           POSTGRES_DB: django_db
+#         ports:
+#           - 5432:5432
+#         # Эта конструкция описывает проверку готовности сервиса postgres
+#         # Если её не будет, то тесты могут запуститься раньше, чем сервер PostgreSQL
+#         # В результате тесты опять решат, что базы нет, — и упадут
+#         options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+
+#     steps:
+#       - uses: actions/checkout@v3
+
+#       - name: Set up Python
+#         uses: actions/setup-python@v4
+#         with:
+#           python-version: 3.12
+
+#       - name: Install dependencies
+#         run: |
+#           python -m pip install --upgrade pip setuptools
+#           pip install flake8==6.0.0 flake8-isort==6.0.0
+#           pip install -r ./backend/requirements.txt
+
+#       # Шаг тестов backend (flake8 + Django tests)
+#       - name: Test with flake8 and django tests
+#         env:
+#           POSTGRES_USER: django_user
+#           POSTGRES_PASSWORD: django_password
+#           POSTGRES_DB: django_db
+#           DB_HOST: 127.0.0.1
+#           DB_PORT: 5432
+#         run: |
+#           python -m flake8 backend/
+#           cd backend/
+#           python manage.py test
+
+#   build_and_push_to_docker_hub:
+#     name: Push backend Docker image to DockerHub
+#     runs-on: ubuntu-latest
+#     needs: tests   # запускать только после успешного прохождения tests
+#     steps:
+#       - name: Check out the repo
+#         uses: actions/checkout@v3
+
+#       - name: Set up Docker Buildx
+#         uses: docker/setup-buildx-action@v2
+
+#       - name: Login to Docker
+#         uses: docker/login-action@v2
+#         with:
+#           username: ${{ secrets.DOCKER_USERNAME }}
+#           password: ${{ secrets.DOCKER_PASSWORD }}
+
+#       - name: Push backend image to DockerHub
+#         uses: docker/build-push-action@v4
+#         with:
+#           context: ./backend/
+#           push: true
+#           platforms: linux/amd64
+#           tags: mrsafonov/taski_backend:latest
+
+#   frontend_tests:
+#     runs-on: ubuntu-latest
+
+#     steps:
+#       - uses: actions/checkout@v3
+
+#       - name: Set up nodeJS
+#         # Готовый action для установки Node.js
+#         uses: actions/setup-node@v3
+#         with:
+#           node-version: 18
+
+#       - name: Install dependencies
+#         run: |
+#           cd frontend/
+#           npm ci
+
+#       - name: Test frontend
+#         run: |
+#           cd frontend/
+#           npm run test
+
+#   build_frontend_and_push_to_docker_hub:
+#     name: Push frontend Docker image to DockerHub
+#     runs-on: ubuntu-latest
+#     needs: frontend_tests
+#     steps:
+#       - name: Check out the repo
+#         uses: actions/checkout@v3
+
+#       - name: Set up Docker Buildx
+#         uses: docker/setup-buildx-action@v2
+
+#       - name: Login to Docker
+#         uses: docker/login-action@v2
+#         with:
+#           username: ${{ secrets.DOCKER_USERNAME }}
+#           password: ${{ secrets.DOCKER_PASSWORD }}
+
+#       - name: Push frontend image to DockerHub
+#         uses: docker/build-push-action@v4
+#         with:
+#           context: ./frontend/
+#           push: true
+#           # Можно добавить platforms: linux/amd64, но в уроке это не обязательно
+#           tags: mrsafonov/taski_frontend:latest
+
+#   build_gateway_and_push_to_docker_hub:
+#     name: Push gateway Docker image to DockerHub
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Check out the repo
+#         uses: actions/checkout@v3
+
+#       - name: Set up Docker Buildx
+#         uses: docker/setup-buildx-action@v2
+
+#       - name: Login to Docker
+#         uses: docker/login-action@v2
+#         with:
+#           username: ${{ secrets.DOCKER_USERNAME }}
+#           password: ${{ secrets.DOCKER_PASSWORD }}
+
+#       - name: Push gateway image to DockerHub
+#         uses: docker/build-push-action@v4
+#         with:
+#           context: ./gateway/
+#           push: true
+#           tags: mrsafonov/taski_gateway:latest
+
+#   deploy:
+#     runs-on: ubuntu-latest
+#     needs:
+#       - build_and_push_to_docker_hub
+#       - build_frontend_and_push_to_docker_hub
+#       - build_gateway_and_push_to_docker_hub
+
+#     steps:
+#       - name: Checkout repo
+#         uses: actions/checkout@v3
+
+#       - name: Copy docker-compose.production.yml via ssh
+#         uses: appleboy/scp-action@master
+#         with:
+#           host: ${{ secrets.HOST }}
+#           username: ${{ secrets.USER }}
+#           key: ${{ secrets.SSH_KEY }}
+#           passphrase: ${{ secrets.SSH_PASSPHRASE }}
+#           source: "docker-compose.production.yml"
+#           target: "taski"
+
+#       - name: Executing remote ssh commands to deploy
+#         uses: appleboy/ssh-action@master
+#         with:
+#           host: ${{ secrets.HOST }}
+#           username: ${{ secrets.USER }}
+#           key: ${{ secrets.SSH_KEY }}
+#           passphrase: ${{ secrets.SSH_PASSPHRASE }}
+#           script: |
+#             cd taski
+#             sudo docker compose -f docker-compose.production.yml pull
+#             sudo docker compose -f docker-compose.production.yml down
+#             sudo docker compose -f docker-compose.production.yml up -d
+#             sudo docker compose -f docker-compose.production.yml exec backend python manage.py migrate
+#             sudo docker compose -f docker-compose.production.yml exec backend python manage.py collectstatic --noinput
+#             sudo docker compose -f docker-compose.production.yml exec backend cp -r /app/collected_static/. /backend_static/static/
+
 name: Main Taski workflow
 
 on:
@@ -217,21 +403,15 @@ on:
 jobs:
   tests:
     runs-on: ubuntu-latest
-    # Блок services аналогичен docker-compose.yml
     services:
       postgres:
         image: postgres:13.10
-        # Указываем имя тестовой базы, имя и пароль пользователя в открытом виде,
-        # ведь эта база будет работать только во время прогона тестов
         env:
           POSTGRES_USER: django_user
           POSTGRES_PASSWORD: django_password
           POSTGRES_DB: django_db
         ports:
           - 5432:5432
-        # Эта конструкция описывает проверку готовности сервиса postgres
-        # Если её не будет, то тесты могут запуститься раньше, чем сервер PostgreSQL
-        # В результате тесты опять решат, что базы нет, — и упадут
         options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
 
     steps:
@@ -248,7 +428,6 @@ jobs:
           pip install flake8==6.0.0 flake8-isort==6.0.0
           pip install -r ./backend/requirements.txt
 
-      # Шаг тестов backend (flake8 + Django tests)
       - name: Test with flake8 and django tests
         env:
           POSTGRES_USER: django_user
@@ -264,22 +443,18 @@ jobs:
   build_and_push_to_docker_hub:
     name: Push backend Docker image to DockerHub
     runs-on: ubuntu-latest
-    needs: tests   # запускать только после успешного прохождения tests
+    needs: tests
     steps:
-      - name: Check out the repo
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+      - uses: docker/setup-buildx-action@v2
 
-      - name: Login to Docker
-        uses: docker/login-action@v2
+      - uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Push backend image to DockerHub
-        uses: docker/build-push-action@v4
+      - uses: docker/build-push-action@v4
         with:
           context: ./backend/
           push: true
@@ -288,13 +463,10 @@ jobs:
 
   frontend_tests:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v3
 
-      - name: Set up nodeJS
-        # Готовый action для установки Node.js
-        uses: actions/setup-node@v3
+      - uses: actions/setup-node@v3
         with:
           node-version: 18
 
@@ -313,44 +485,34 @@ jobs:
     runs-on: ubuntu-latest
     needs: frontend_tests
     steps:
-      - name: Check out the repo
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+      - uses: docker/setup-buildx-action@v2
 
-      - name: Login to Docker
-        uses: docker/login-action@v2
+      - uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Push frontend image to DockerHub
-        uses: docker/build-push-action@v4
+      - uses: docker/build-push-action@v4
         with:
           context: ./frontend/
           push: true
-          # Можно добавить platforms: linux/amd64, но в уроке это не обязательно
           tags: mrsafonov/taski_frontend:latest
 
   build_gateway_and_push_to_docker_hub:
-    name: Push gateway Docker image to DockerHub
     runs-on: ubuntu-latest
     steps:
-      - name: Check out the repo
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+      - uses: docker/setup-buildx-action@v2
 
-      - name: Login to Docker
-        uses: docker/login-action@v2
+      - uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Push gateway image to DockerHub
-        uses: docker/build-push-action@v4
+      - uses: docker/build-push-action@v4
         with:
           context: ./gateway/
           push: true
@@ -364,8 +526,7 @@ jobs:
       - build_gateway_and_push_to_docker_hub
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
       - name: Copy docker-compose.production.yml via ssh
         uses: appleboy/scp-action@master
@@ -375,21 +536,3 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           passphrase: ${{ secrets.SSH_PASSPHRASE }}
           source: "docker-compose.production.yml"
-          target: "taski"
-
-      - name: Executing remote ssh commands to deploy
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.HOST }}
-          username: ${{ secrets.USER }}
-          key: ${{ secrets.SSH_KEY }}
-          passphrase: ${{ secrets.SSH_PASSPHRASE }}
-          script: |
-            cd taski
-            sudo docker compose -f docker-compose.production.yml pull
-            sudo docker compose -f docker-compose.production.yml down
-            sudo docker compose -f docker-compose.production.yml up -d
-            sudo docker compose -f docker-compose.production.yml exec backend python manage.py migrate
-            sudo docker compose -f docker-compose.production.yml exec backend python manage.py collectstatic --noinput
-            sudo docker compose -f docker-compose.production.yml exec backend cp -r /app/collected_static/. /backend_static/static/
-
